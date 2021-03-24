@@ -82,7 +82,7 @@ spec:
           - "-c"
           - |
             # get this node's labels and trim whitespaces and commas, result is something like 'group1/key1=value1 group2/key2=value2 key3=value3' with all labels
-            KUBERNETES_NODE_LABELS=$(kubectl get node "$KUBERNETES_NODE_NAME" --show-labels | tail -n1 | sed "s/  */ /g" | cut -d ' ' -f 6 | tr ',' '\n')
+            KUBERNETES_NODE_LABELS=$(kubectl get node "$KUBERNETES_NODE_NAME" --show-labels | awk 'END{print $6}' | tr ',' '\n')
 
             function set_node_taints_with_effect() {
               EFFECT=$1
@@ -91,15 +91,15 @@ spec:
               for LABEL_NAME in $LABELS; do
 
                 # find if this label is set on the node
-                LABEL_VALUE=$(echo "$KUBERNETES_NODE_LABELS" | grep -e "^$LABEL_NAME=")
-
-                if [[ $? == 0 ]]; then
+                if LABEL_VALUE=$(echo "$KUBERNETES_NODE_LABELS" | grep -e "^$LABEL_NAME="); then
                   # if it is set on the node find its value
                   LABEL_VALUE=$(echo "$LABEL_VALUE" | cut -d '=' -f 2)
 
                   # and apply it as a taint on the node with this $EFFECT
                   echo "[DEBUG - $(date)]: label \"$LABEL_NAME\" found in \"$KUBERNETES_NODE_NAME\" with value \"$LABEL_VALUE\", adding taint for effect $EFFECT"
-                  [[ "$DRY_RUN" != "true" ]] && kubectl taint nodes $KUBERNETES_NODE_NAME $LABEL_NAME=$LABEL_VALUE:$EFFECT || true
+                  if ! "$DRY_RUN"; then
+                    kubectl taint nodes $KUBERNETES_NODE_NAME $LABEL_NAME=$LABEL_VALUE:$EFFECT
+                  fi
 
                 else
 
@@ -117,13 +117,13 @@ spec:
             # set custom taints
             for LABEL in $CUSTOM_TAINTS; do
               # find the name and value and effect
-              LABEL_NAME=$(echo $LABEL | cut -d '=' -f 1)
-              LABEL_VALUE=$(echo $LABEL | cut -d '=' -f 2 | cut -d ':' -f 1)
-              EFFECT=$(echo $LABEL | cut -d '=' -f 2 | cut -d ':' -f 2)
+              IFS="=:" read LABEL_NAME LABEL_VALUE EFFECT <<< "$LABEL"
 
               # set the actual taint
               echo "[DEBUG - $(date)]: setting taint for custom label \"$LABEL_NAME\" and value \"$LABEL_VALUE\" with effect \"$EFFECT\""
-              [[ "$DRY_RUN" != "true" ]] && kubectl taint nodes $KUBERNETES_NODE_NAME $LABEL_NAME=$LABEL_VALUE:$EFFECT || true
+              if ! "$DRY_RUN"; then
+                kubectl taint nodes $KUBERNETES_NODE_NAME $LABEL_NAME=$LABEL_VALUE:$EFFECT
+              fi
             done
 
         resources:
