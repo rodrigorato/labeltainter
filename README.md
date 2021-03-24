@@ -24,7 +24,7 @@ To install it directly on your cluster you can:
 $ kubectl apply -f https://raw.githubusercontent.com/rodrigorato/labeltainter/main/k8s/labeltainter.yaml
 ```
 
-**Although...** You'd probably like to touch up the configuration first before installing it, so that it features the label set you want to use as taints, so go ahead and download `k8s/labeltainter.yaml` and change the configuration before applying it (or build a kustomize layer based on it if thats your thing.
+**Although...** You'd probably like to touch up the configuration first before installing it, so that it features the label set you want to use as taints, so go ahead and download `k8s/labeltainter.yaml` and change the configuration before applying it (or build a kustomize layer based on it if thats your thing).
 
 ### Uninstalling labeltainter from your cluster
 A simple uninstallation would be:
