@@ -1,0 +1,183 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: labeltainter
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: labeltainter
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: labeltainter
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: labeltainter
+subjects:
+  - kind: ServiceAccount
+    name: labeltainter
+    namespace: kube-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: labeltainter
+  namespace: kube-system
+data:
+  # a space separated string with the names of the node's labels to use with the effect NoSchedule
+  # will use the value defined in the label value
+  TAINT_WITH_NOSCHEDULE: ""
+
+  # a space separated string with the names of the node's labels to use with the effect NoExecute
+  # will use the value defined in the label value
+  TAINT_WITH_NOEXECUTE: ""
+
+  # a space separated string with the names of the node's labels to use with the effect PreferNoSchedule
+  # will use the value defined in the label value
+  TAINT_WITH_PREFERNOSCHEDULE: ""
+
+  # a space separated string with custom taints to set to the node in the following format:
+  # "key1=value1:NoSchedule key2=value2:NoExecute key3=value3:PreferNoSchedule"
+  CUSTOM_TAINTS: ""
+
+  # if set to "true" no taints will actually be applied and the "plan" will be outputted
+  DRY_RUN: "false"
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: labeltainter
+  namespace: kube-system
+  labels:
+    k8s-app: labeltainter
+spec:
+  selector:
+    matchLabels:
+      name: labeltainter
+  template:
+    metadata:
+      labels:
+        name: labeltainter
+    spec:
+      serviceAccountName: labeltainter
+      tolerations:
+      # by having a toleration with an empty key and effect, we effectively tolerate all taints
+      - operator: "Exists"
+        key: ""
+        effect: ""
+      initContainers:
+      - name: labeltainter
+        image: bitnami/kubectl:1.20.5
+        command:
+          - /bin/bash
+          - "-c"
+          - |
+            # get this node's labels and trim whitespaces and commas, result is something like 'group1/key1=value1 group2/key2=value2 key3=value3' with all labels
+            KUBERNETES_NODE_LABELS=$(kubectl get node "$KUBERNETES_NODE_NAME" --show-labels | tail -n1 | sed "s/  */ /g" | cut -d ' ' -f 6 | tr ',' '\n')
+
+            function set_node_taints_with_effect() {
+              EFFECT=$1
+              LABELS=$2
+
+              for LABEL_NAME in $LABELS; do
+
+                # find if this label is set on the node
+                LABEL_VALUE=$(echo "$KUBERNETES_NODE_LABELS" | grep -e "^$LABEL_NAME=")
+
+                if [[ $? == 0 ]]; then
+                  # if it is set on the node find its value
+                  LABEL_VALUE=$(echo "$LABEL_VALUE" | cut -d '=' -f 2)
+
+                  # and apply it as a taint on the node with this $EFFECT
+                  echo "[DEBUG - $(date)]: label \"$LABEL_NAME\" found in \"$KUBERNETES_NODE_NAME\" with value \"$LABEL_VALUE\", adding taint for effect $EFFECT"
+                  [[ "$DRY_RUN" != "true" ]] && kubectl taint nodes $KUBERNETES_NODE_NAME $LABEL_NAME=$LABEL_VALUE:$EFFECT || true
+
+                else
+
+                  # if it is not found, log this behavior
+                  echo "[INFO - $(date)]: label \"$LABEL_NAME\" not found in \"$KUBERNETES_NODE_NAME\", will not be adding taint for effect $EFFECT"
+                fi
+              done
+            }
+
+            # set node based taints
+            set_node_taints_with_effect "NoSchedule" "$TAINT_WITH_NOSCHEDULE"
+            set_node_taints_with_effect "NoExecute" "$TAINT_WITH_NOEXECUTE"
+            set_node_taints_with_effect "PreferNoSchedule" "$TAINT_WITH_PREFERNOSCHEDULE"
+
+            # set custom taints
+            for LABEL in $CUSTOM_TAINTS; do
+              # find the name and value and effect
+              LABEL_NAME=$(echo $LABEL | cut -d '=' -f 1)
+              LABEL_VALUE=$(echo $LABEL | cut -d '=' -f 2 | cut -d ':' -f 1)
+              EFFECT=$(echo $LABEL | cut -d '=' -f 2 | cut -d ':' -f 2)
+
+              # set the actual taint
+              echo "[DEBUG - $(date)]: setting taint for custom label \"$LABEL_NAME\" and value \"$LABEL_VALUE\" with effect \"$EFFECT\""
+              [[ "$DRY_RUN" != "true" ]] && kubectl taint nodes $KUBERNETES_NODE_NAME $LABEL_NAME=$LABEL_VALUE:$EFFECT || true
+            done
+
+        resources:
+          limits:
+            cpu: 100m
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 50Mi
+        env:
+          # set the node name where this pode is running so that we can taint it
+          - name: KUBERNETES_NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          # set the names of the labels to be tainted with NoSchedule
+          - name: TAINT_WITH_NOSCHEDULE
+            valueFrom:
+              configMapKeyRef:
+                name: labeltainter
+                key: TAINT_WITH_NOSCHEDULE
+          # set the names of the labels to be tainted with NoExecute
+          - name: TAINT_WITH_NOEXECUTE
+            valueFrom:
+              configMapKeyRef:
+                name: labeltainter
+                key: TAINT_WITH_NOEXECUTE
+          # set the names of the labels to be tainted with PreferNoSchedule
+          - name: TAINT_WITH_PREFERNOSCHEDULE
+            valueFrom:
+              configMapKeyRef:
+                name: labeltainter
+                key: TAINT_WITH_PREFERNOSCHEDULE
+          # set additional custom taints to use for the node
+          - name: CUSTOM_TAINTS
+            valueFrom:
+              configMapKeyRef:
+                name: labeltainter
+                key: CUSTOM_TAINTS
+          # set the desired DRY_RUNNINESS
+          - name: DRY_RUN
+            valueFrom:
+              configMapKeyRef:
+                name: labeltainter
+                key: DRY_RUN
+      containers:
+        # use a pause container to make sure this DaemonSet runs exactly once per node
+        # at start time and that it doesn't keep consuming CPU and memory
+        - name: pause
+          image: gcr.io/google_containers/pause:3.2
+          resources:
+            requests: &Requests
+              cpu: 50m
+              memory: 50Mi
+            limits: *Requests
+
+
