@@ -3,6 +3,9 @@ Set Kubernetes node taints based on node or custom labels without having to conf
 
 Useful for managed node group setups where you don't control the nodes directly, so not able to set taints on the nodes easily.
 
+This is what I believe to be an elegant solution given the constraints for the problem.
+However, do keep in mind that this is far from ideal and should only be used when no other option is available.
+
 ## Goals
 This project has the following objectives:
 * Allow adding taints on Kubernetes nodes based:
