@@ -9,7 +9,8 @@ However, do keep in mind that this is far from ideal and should only be used whe
 ## Goals
 This project has the following objectives:
 * Allow adding taints on Kubernetes nodes based:
-    * Label key/values present on nodes on the Kubernetes cluster;
+    * Label key/values if key is present on nodes;
+    * Label key/values if pair is present on nodes;
     * Custom label key/value combinations;
 * Keep the lowest possible runtime overhead;
 * Keep the solution as simple and as clean as possible;
