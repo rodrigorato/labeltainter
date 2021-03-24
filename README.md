@@ -41,3 +41,6 @@ An init container is used to make sure this runs exactly once, when the node sta
 
 The init container logs show exactly what changes were made, based on your configuration for `labeltainter`, as well as the cluster nodes' existing labels.
 
+## Acknowledgements
+* [Raul Gonzales](https://github.com/gonzalesraul) for the brainstorm;
+* **You**, maybe? If you got something to contribute I'll definitely add you here! :)
