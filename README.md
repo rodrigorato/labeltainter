@@ -46,4 +46,5 @@ The init container logs show exactly what changes were made, based on your confi
 
 ## Acknowledgements
 * [Raul Gonzales](https://github.com/gonzalesraul) for the brainstorm;
+* [Nuno Silva](https://github.com/nuno-silva) for simplifying the script;
 * **You**, maybe? If you got something to contribute I'll definitely add you here! :)
