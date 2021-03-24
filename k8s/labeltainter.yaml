@@ -34,16 +34,34 @@ metadata:
   namespace: kube-system
 data:
   # a space separated string with the names of the node's labels to use with the effect NoSchedule
-  # will use the value defined in the label value
-  TAINT_WITH_NOSCHEDULE: ""
+  # will use the value defined in the label value if label present, else no taint will be added
+  # expected format: "mylabelgroup/label-name other-label"
+  TAINT_WITH_NOSCHEDULE_KEY: ""
 
   # a space separated string with the names of the node's labels to use with the effect NoExecute
-  # will use the value defined in the label value
-  TAINT_WITH_NOEXECUTE: ""
+  # will use the value defined in the label value if label present, else no taint will be added
+  # expected format: "mylabelgroup/label-name other-label"
+  TAINT_WITH_NOEXECUTE_KEY: ""
 
   # a space separated string with the names of the node's labels to use with the effect PreferNoSchedule
-  # will use the value defined in the label value
-  TAINT_WITH_PREFERNOSCHEDULE: ""
+  # will use the value defined in the label value if label present, else no taint will be added
+  # expected format: "mylabelgroup/label-name other-label"
+  TAINT_WITH_PREFERNOSCHEDULE_KEY: ""
+
+  # a space separated string with the names and values of the node's labels to use with the effect NoSchedule
+  # will use the value defined here if label and key are present and match this, else no taint will be added
+  # expected format: "mylabelgroup/label-name=labelvalue other-label=othervalue"
+  TAINT_WITH_NOSCHEDULE_KEYVALUE: ""
+
+  # a space separated string with the names and values of the node's labels to use with the effect NoExecute
+  # will use the value defined here if label and key are present and match this, else no taint will be added
+  # expected format: "mylabelgroup/label-name=labelvalue other-label=othervalue"
+  TAINT_WITH_NOEXECUTE_KEYVALUE: ""
+
+  # a space separated string with the names and values of the node's labels to use with the effect PreferNoSchedule
+  # will use the value defined here if label and key are present and match this, else no taint will be added
+  # expected format: "mylabelgroup/label-name=labelvalue other-label=othervalue"
+  TAINT_WITH_PREFERNOSCHEDULE_KEYVALUE: ""
 
   # a space separated string with custom taints to set to the node in the following format:
   # "key1=value1:NoSchedule key2=value2:NoExecute key3=value3:PreferNoSchedule"
@@ -84,35 +102,52 @@ spec:
             # get this node's labels and trim whitespaces and commas, result is something like 'group1/key1=value1 group2/key2=value2 key3=value3' with all labels
             KUBERNETES_NODE_LABELS=$(kubectl get node "$KUBERNETES_NODE_NAME" --show-labels | awk 'END{print $6}' | tr ',' '\n')
 
-            function set_node_taints_with_effect() {
+            function set_node_taints() {
               EFFECT=$1
               LABELS=$2
 
-              for LABEL_NAME in $LABELS; do
+              for LABEL in $LABELS; do
+                # parse this label's name and value (value is optional)
+                IFS="=" read LABEL_NAME LABEL_VALUE <<< "$LABEL"
 
-                # find if this label is set on the node
-                if LABEL_VALUE=$(echo "$KUBERNETES_NODE_LABELS" | grep -e "^$LABEL_NAME="); then
-                  # if it is set on the node find its value
-                  LABEL_VALUE=$(echo "$LABEL_VALUE" | cut -d '=' -f 2)
+                # we'll use this expression to try to find the label in the node
+                GREP_EXPR="^$LABEL_NAME="
 
-                  # and apply it as a taint on the node with this $EFFECT
-                  echo "[DEBUG - $(date)]: label \"$LABEL_NAME\" found in \"$KUBERNETES_NODE_NAME\" with value \"$LABEL_VALUE\", adding taint for effect $EFFECT"
+                # check if the label's value was defined in the input, if it was we need to make sure we grep for that as well
+                if [ -n "$LABEL_VALUE" ]; then
+                  GREP_EXPR="$GREP_EXPR$LABEL_VALUE$"
+                fi
+
+                if NODE_LABEL=$(echo "$KUBERNETES_NODE_LABELS" | grep -e "$GREP_EXPR"); then
+                  # the label was found on this node, try to find the value if we don't have it
+                  if [ -z "$LABEL_VALUE" ]; then
+                    LABEL_VALUE=$(echo "$NODE_LABEL" | cut -d '=' -f 2)
+                  fi
+
+                  # now that we surely have the LABEL_NAME, LABEL_VALUE and EFFECT, let's apply the taint
+                  echo "[DEBUG - $(date)]: label \"$LABEL_NAME\" found in \"$KUBERNETES_NODE_NAME\", adding taint for effect \"$EFFECT\" with value \"$LABEL_VALUE\""
+                  echo "[DEBUG - $(date)]: kubectl taint nodes $KUBERNETES_NODE_NAME $LABEL_NAME=$LABEL_VALUE:$EFFECT"
                   if ! "$DRY_RUN"; then
-                    kubectl taint nodes $KUBERNETES_NODE_NAME $LABEL_NAME=$LABEL_VALUE:$EFFECT
+                    kubectl taint nodes "$KUBERNETES_NODE_NAME" "$LABEL_NAME=$LABEL_VALUE:$EFFECT"
                   fi
 
                 else
-
-                  # if it is not found, log this behavior
-                  echo "[INFO - $(date)]: label \"$LABEL_NAME\" not found in \"$KUBERNETES_NODE_NAME\", will not be adding taint for effect $EFFECT"
+                  # there was no match for this label or label/value pair in this node, just log this
+                  echo "[INFO - $(date)]: label \"$LABEL_NAME\" not found or value did not match in \"$KUBERNETES_NODE_NAME\", will not be adding taint for effect \"$EFFECT\""
                 fi
+
               done
             }
 
-            # set node based taints
-            set_node_taints_with_effect "NoSchedule" "$TAINT_WITH_NOSCHEDULE"
-            set_node_taints_with_effect "NoExecute" "$TAINT_WITH_NOEXECUTE"
-            set_node_taints_with_effect "PreferNoSchedule" "$TAINT_WITH_PREFERNOSCHEDULE"
+            # set node based taints using key matching only
+            set_node_taints "NoSchedule" "$TAINT_WITH_NOSCHEDULE_KEY"
+            set_node_taints "NoExecute" "$TAINT_WITH_NOEXECUTE_KEY"
+            set_node_taints "PreferNoSchedule" "$TAINT_WITH_PREFERNOSCHEDULE_KEY"
+
+            # set node based taints using key and value matching
+            set_node_taints "NoSchedule" "$TAINT_WITH_NOSCHEDULE_KEYVALUE"
+            set_node_taints "NoExecute" "$TAINT_WITH_NOEXECUTE_KEYVALUE"
+            set_node_taints "PreferNoSchedule" "$TAINT_WITH_PREFERNOSCHEDULE_KEYVALUE"
 
             # set custom taints
             for LABEL in $CUSTOM_TAINTS; do
@@ -121,8 +156,9 @@ spec:
 
               # set the actual taint
               echo "[DEBUG - $(date)]: setting taint for custom label \"$LABEL_NAME\" and value \"$LABEL_VALUE\" with effect \"$EFFECT\""
+              echo "[DEBUG - $(date)]: kubectl taint nodes $KUBERNETES_NODE_NAME $LABEL_NAME=$LABEL_VALUE:$EFFECT"
               if ! "$DRY_RUN"; then
-                kubectl taint nodes $KUBERNETES_NODE_NAME $LABEL_NAME=$LABEL_VALUE:$EFFECT
+                kubectl taint nodes "$KUBERNETES_NODE_NAME" "$LABEL_NAME=$LABEL_VALUE:$EFFECT"
               fi
             done
 
@@ -140,23 +176,41 @@ spec:
               fieldRef:
                 fieldPath: spec.nodeName
           # set the names of the labels to be tainted with NoSchedule
-          - name: TAINT_WITH_NOSCHEDULE
+          - name: TAINT_WITH_NOSCHEDULE_KEY
             valueFrom:
               configMapKeyRef:
                 name: labeltainter
-                key: TAINT_WITH_NOSCHEDULE
+                key: TAINT_WITH_NOSCHEDULE_KEY
           # set the names of the labels to be tainted with NoExecute
-          - name: TAINT_WITH_NOEXECUTE
+          - name: TAINT_WITH_NOEXECUTE_KEY
             valueFrom:
               configMapKeyRef:
                 name: labeltainter
-                key: TAINT_WITH_NOEXECUTE
+                key: TAINT_WITH_NOEXECUTE_KEY
           # set the names of the labels to be tainted with PreferNoSchedule
-          - name: TAINT_WITH_PREFERNOSCHEDULE
+          - name: TAINT_WITH_PREFERNOSCHEDULE_KEY
             valueFrom:
               configMapKeyRef:
                 name: labeltainter
-                key: TAINT_WITH_PREFERNOSCHEDULE
+                key: TAINT_WITH_PREFERNOSCHEDULE_KEY
+          # set the names and values of the labels to be tainted with NoSchedule
+          - name: TAINT_WITH_NOSCHEDULE_KEYVALUE
+            valueFrom:
+              configMapKeyRef:
+                name: labeltainter
+                key: TAINT_WITH_NOSCHEDULE_KEYVALUE
+          # set the names and values of the labels to be tainted with NoExecute
+          - name: TAINT_WITH_NOEXECUTE_KEYVALUE
+            valueFrom:
+              configMapKeyRef:
+                name: labeltainter
+                key: TAINT_WITH_NOEXECUTE_KEYVALUE
+          # set the names and values of the labels to be tainted with PreferNoSchedule
+          - name: TAINT_WITH_PREFERNOSCHEDULE_KEYVALUE
+            valueFrom:
+              configMapKeyRef:
+                name: labeltainter
+                key: TAINT_WITH_PREFERNOSCHEDULE_KEYVALUE
           # set additional custom taints to use for the node
           - name: CUSTOM_TAINTS
             valueFrom:
